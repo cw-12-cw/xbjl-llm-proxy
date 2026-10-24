@@ -55,20 +55,26 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ ok: true, ep: EP_ID ? EP_ID.slice(0, 8) + '...' : 'MISSING', env: process.env.CLOUD_ENV || 'unknown' }));
   }
   // 业务入口：POST /chat
-  if (req.method === 'POST' && req.url === '/chat') {
-    if (TOKEN && req.headers['x-token'] !== TOKEN) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, error: 'forbidden' }));
-    }
-    if (!EP_ID) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, error: 'missing endpoint id (MEP_XBJL/XBJL_EP_ID)' }));
-    }
+  // 鉴权三通道：x-token 头 / ?token= 查询参数 / body.token 字段
+  // （抖音云 CDN 层会拦 x-token 自定义头，故主用查询参数）
+  if (req.method === 'POST' && req.url.split('?')[0] === '/chat') {
+    const q = new URL(req.url, 'http://localhost');
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', async () => {
+      let bodyObj = {};
+      try { bodyObj = JSON.parse(raw || '{}'); } catch (e) {}
+      const gotToken = req.headers['x-token'] || q.searchParams.get('token') || bodyObj.token || '';
+      if (TOKEN && gotToken !== TOKEN) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'forbidden' }));
+      }
+      if (!EP_ID) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: 'missing endpoint id (MEP_XBJL/XBJL_EP_ID)' }));
+      }
       try {
-        const payload = JSON.parse(raw);
+        const payload = bodyObj;
         if (!Array.isArray(payload.messages) || !payload.messages.length) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           return res.end(JSON.stringify({ ok: false, error: 'messages required' }));
